@@ -13,6 +13,13 @@ class InstagramProfile:
     username: str
     account_type: str
 
+@dataclass
+class InstagramMedia:
+    id: str
+    media_type: str
+    timestamp: str
+    caption: str | None = None
+
 class InstagramClient:
     _owns_http_client: bool
 
@@ -32,6 +39,19 @@ class InstagramClient:
             self.httpx_client = httpx_client
             self._owns_http_client = False
 
+    def __enter__(self) -> InstagramClient:
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        if self._owns_http_client:
+            self.httpx_client.close()
+        self._closed = True
+
     def get_profile(self) -> InstagramProfile:
         if self._closed:
             raise RuntimeError("Error: tried to use closed wrapper")
@@ -46,25 +66,30 @@ class InstagramClient:
         data = r.json()
         return InstagramProfile(**data)
 
-    def close(self) -> None:
+    def get_media(self) -> list[InstagramMedia]:
         if self._closed:
-            return
-        if self._owns_http_client:
-            self.httpx_client.close()
-        self._closed = True
+            raise RuntimeError("Error: tried to use closed wrapper")
+        r = self.httpx_client.get(
+            "me/media",
+            params={
+                "fields": "id,caption,media_type,timestamp",
+                "access_token": self.access_token,
+                "limit": 10
+            }
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+        return [InstagramMedia(**entry) for entry in data]
 
-    def __enter__(self) -> InstagramClient:
-        return self
+if __name__ == "__main__":
+    token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> None:
-        self.close()
+    if not token:
+        raise ValueError("INSTAGRAM_ACCESS_TOKEN is not set")
 
-token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
+    with InstagramClient(token) as ic:
+        profile = ic.get_profile()
+        media = ic.get_media()
 
-if not token:
-    raise ValueError("INSTAGRAM_ACCESS_TOKEN is not set")
-
-with InstagramClient(token) as ic:
-    profile = ic.get_profile()
-
-print(profile)
+    print(profile)
+    print(media)

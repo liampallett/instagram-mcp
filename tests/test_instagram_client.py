@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from src.client import InstagramClient, InstagramProfile
+from src.client import InstagramClient, InstagramProfile, InstagramMedia
 
 def test_get_profile_success():
     def mock_handler(request : httpx.Request) -> httpx.Response:
@@ -74,3 +74,80 @@ def test_repeated_close():
     instagram = InstagramClient("fake token")
     instagram.close()
     instagram.close()
+
+
+def test_get_media_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/me/media"
+        assert request.url.params["access_token"] == "test-token"
+        assert request.url.params["fields"] == "id,caption,media_type,timestamp"
+        assert request.url.params["limit"] == "10"
+
+        return httpx.Response(200, json={
+            "data": [
+                {
+                    "id": "123",
+                    "caption": "My first post",
+                    "media_type": "IMAGE",
+                    "timestamp": "2026-10-18T12:00:00+0000"
+                },
+                {
+                    "id": "456",
+                    "caption": "My second post",
+                    "media_type": "CAROUSEL_ALBUM",
+                    "timestamp": "2026-10-19T12:00:00+0000"
+                }
+            ]
+        })
+
+    http_client = httpx.Client(
+        base_url="https://graph.instagram.com",
+        transport=httpx.MockTransport(handler)
+    )
+
+    with http_client:
+        with InstagramClient("test-token", httpx_client=http_client) as client:
+            media = client.get_media()
+
+    assert len(media) == 2
+    assert all(isinstance(post, InstagramMedia) for post in media)
+    assert media[0].id == "123"
+    assert media[0].caption == "My first post"
+    assert media[1].media_type == "CAROUSEL_ALBUM"
+
+
+def test_get_media_no_caption():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "data": [
+                {
+                    "id": "789",
+                    "media_type": "IMAGE",
+                    "timestamp": "2026-10-20T12:00:00+0000"
+                }
+            ]
+        })
+
+    with httpx.Client(
+        base_url="https://graph.instagram.com",
+        transport=httpx.MockTransport(handler)
+    ) as http_client:
+        with InstagramClient("test-token", httpx_client=http_client) as client:
+            media = client.get_media()
+
+    assert len(media) == 1
+    assert media[0].caption is None
+
+
+def test_get_media_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": []})
+
+    with httpx.Client(
+        base_url="https://graph.instagram.com",
+        transport=httpx.MockTransport(handler)
+    ) as http_client:
+        with InstagramClient("test-token", httpx_client=http_client) as client:
+            media = client.get_media()
+
+    assert media == []
